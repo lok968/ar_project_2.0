@@ -10,36 +10,57 @@
 
     <style>
       body { margin: 0; overflow: hidden; font-family: "Microsoft YaHei", sans-serif; }
-      .a-enter-vr { display: none; }
+      .a-enter-vr { display: none; } /* 隐藏右下角的VR按钮 */
 
-      /* 音乐控制图标 */
+      /* 浏览器引导遮罩层 (极致顶层，防裁剪拦截器) */
+      #env-mask {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.95); z-index: 9999999; display: none;
+        color: white; padding: 30px; box-sizing: border-box;
+      }
+      .mask-arrow {
+        text-align: right; font-size: 50px; font-weight: bold; 
+        color: #7cb342; animation: bounce 1s infinite alternate;
+        margin-right: 10px; margin-top: -10px;
+      }
+      .mask-content {
+        text-align: center; margin-top: 30px;
+      }
+      .mask-content h2 { color: #7cb342; font-size: 24px; margin-bottom: 20px;}
+      .mask-content p { font-size: 16px; line-height: 1.8; color: #ddd;}
+      @keyframes bounce {
+        from { transform: translateY(0); }
+        to { transform: translateY(-15px); }
+      }
+
+      /* 音乐控制图标 (提高层级，防遮挡) */
       #music-toggle {
         position: fixed; top: 20px; right: 20px; z-index: 99999;
         width: 40px; height: 40px; background: rgba(255, 255, 255, 0.9);
         border-radius: 50%; display: flex; justify-content: center; align-items: center;
         font-size: 20px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        pointer-events: auto; 
+        pointer-events: auto; /* 允许点击 */
       }
       .music-playing { animation: spin 4s linear infinite; }
       @keyframes spin { 100% { transform: rotate(360deg); } }
 
-      /* 底部按钮面板 */
+      /* 底部按钮面板 (核心修复：防穿透与超高层级) */
       #menu-panel {
         position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-        z-index: 99999; 
-        width: 90%; display: none; 
+        z-index: 99999; /* 绝对盖过 AR 的透明画布 */
+        width: 90%; display: none; /* 识别成功后改为 flex */
         flex-direction: column; gap: 12px;
-        pointer-events: none; 
+        pointer-events: none; /* 容器本身允许触摸穿透，防止挡住屏幕 */
       }
 
       .info-btn {
-        pointer-events: auto; 
+        pointer-events: auto; /* 按钮本身强制拦截触摸 */
         padding: 14px 20px; background: rgba(124, 179, 66, 0.95);
         color: white; border: 2px solid #ffffff; border-radius: 25px;
         font-weight: bold; cursor: pointer; font-size: 15px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         -webkit-tap-highlight-color: transparent;
-        user-select: none; 
+        user-select: none; /* 防止长按选中文本 */
       }
       .info-btn:active { background: #558b2f; transform: scale(0.96); }
       
@@ -52,6 +73,14 @@
   </head>
   
   <body>
+    <div id="env-mask">
+      <div class="mask-arrow">↗</div>
+      <div class="mask-content">
+        <h2>⚠️ 镜头视野受限</h2>
+        <p>检测到您正在使用内置浏览器<br>为获得完整的 <b>AR 广角视野</b><br><br>请点击右上角菜单<br>选择 <b>在系统默认浏览器中打开</b><br>（苹果推荐 Safari，安卓推荐 Chrome）</p>
+      </div>
+    </div>
+
     <audio id="bgm" loop preload="auto">
       <source src="./bgm.mp3" type="audio/mpeg">
     </audio>
@@ -86,7 +115,7 @@
           class="clickable"
           src="#avatarModel" 
           position="0 0 0" 
-          scale="1.2 1.2 1.2"
+          scale="0.8 0.8 0.8"
           animation-mixer="clip: *; loop: repeat"
           animation="property: rotation; from: 0 0 0; to: 0 360 0; dur: 12000; easing: linear; loop: true">
         </a-gltf-model>
@@ -97,6 +126,19 @@
     </a-scene>
 
     <script>
+      // --- 0. 环境嗅探器：拦截非标准浏览器防裁切 ---
+      const ua = navigator.userAgent.toLowerCase();
+      const isWeixin = ua.indexOf('micromessenger') !== -1;
+      const isBaidu = ua.indexOf('baiduboxapp') !== -1;
+      const isQQ = ua.indexOf('qq/') !== -1;
+
+      if (isWeixin || isBaidu || isQQ) {
+        // 如果是这些环境，直接弹出遮罩，强行停止后续 AR 加载
+        document.getElementById('env-mask').style.display = 'block';
+        throw new Error("环境受限，已暂停 AR 引擎，请使用系统自带浏览器打开。"); 
+      }
+
+      // --- 下方为正常的 AR 业务逻辑 ---
       const menuPanel = document.querySelector('#menu-panel');
       const targetEntity = document.querySelector('#target');
       const character = document.querySelector('#character');
@@ -107,24 +149,26 @@
 
       // --- 1. 背景音乐控制 ---
       bgm.volume = 0.2; 
+
       function toggleMusic() {
         if (isMusicPlaying) {
           bgm.pause();
           musicToggle.classList.remove('music-playing');
           musicToggle.style.opacity = "0.5";
         } else {
-          bgm.play().catch(e => console.log("等待交互"));
+          bgm.play().catch(e => console.log("等待用户交互后播放音频"));
           musicToggle.classList.add('music-playing');
           musicToggle.style.opacity = "1";
         }
         isMusicPlaying = !isMusicPlaying;
       }
+
       musicToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         toggleMusic();
       });
 
-      // --- 2. 实时追踪响应 ---
+      // --- 2. 实时追踪响应逻辑 ---
       targetEntity.addEventListener("targetFound", () => {
         menuPanel.style.display = 'flex';
         if (!isMusicPlaying) {
@@ -132,7 +176,7 @@
             isMusicPlaying = true;
             musicToggle.classList.add('music-playing');
             musicToggle.style.opacity = "1";
-          }).catch(e => console.log("需用户手动播放"));
+          }).catch(e => console.log("需用户手动点击播放音乐"));
         }
       });
 
@@ -141,37 +185,42 @@
         window.speechSynthesis.cancel();
       });
 
-      // --- 3. ！！！新增：3D 角色触摸互动逻辑 ！！！ ---
-      // 配置几句随机互动台词
+      // --- 3. 3D 角色触摸互动 ---
       const interactiveLines = [
-        "哎呀，戳到我啦！我是你的元气助教。",
+        "哎呀，戳到我啦！我是您的数字化助教。",
         "触摸科技，感知未来！很高兴为您服务。",
         "您可以点击下方的按钮，了解我们的数字化转型方案哦！",
         "大健康饮品赛道，我们是专业的！"
       ];
 
       character.addEventListener('click', (e) => {
-        // 随机抽取一句台词
+        e.stopPropagation(); // 防止点击穿透到其他层
         const randomText = interactiveLines[Math.floor(Math.random() * interactiveLines.length)];
         speak(randomText);
 
-        // 互动视觉反馈：除了原本说话时的放大，再加上一个“小跳跃”动作
+        // 惊吓小跳跃动画
         character.setAttribute('animation__jump', {
           property: 'position',
-          to: '0 0.1 0', // 向上跳起一点点
+          to: '0 0.1 0',
           dur: 150,
           dir: 'alternate',
           loop: 2
         });
       });
 
-      // --- 4. 业务语音播报逻辑 ---
+      // --- 4. 业务语音播报 ---
       function playIntro(type) {
         let text = "";
         switch(type) {
-          case 'intro': text = "我们是专注大健康饮品赛道的数字化营销赋能团队。基于 AIGC 与 AR 技术，为传统企业提供一站式解决方案。"; break;
-          case 'product': text = "这款产品专注于植物萃取，真正做到零糖、零脂、零防腐剂。致力于让每一株传统草木焕发新机。"; break;
-          case 'cooperate': text = "我们不仅是技术服务商，更是数字化转型合伙人。提供从内容生成到 AR 包装的全链条赋能方案。"; break;
+          case 'intro':
+            text = "我们是专注大健康饮品赛道的数字化营销赋能团队。基于 AIGC 与 AR 技术，为传统企业如广西序元气有限公司，提供一站式解决方案。";
+            break;
+          case 'product':
+            text = "这款产品专注于植物萃取，真正做到零糖、零脂、零防腐剂。我们致力于让每一株传统草木在数字时代焕发新的生机。";
+            break;
+          case 'cooperate':
+            text = "我们不仅是技术服务商，更是深耕大健康饮品赛道的数字化转型合伙人。提供从内容生成到 AR 包装的全链条赋能方案。";
+            break;
         }
         speak(text);
       }
@@ -182,7 +231,6 @@
         utter.lang = 'zh-CN';
         utter.rate = 1.0;
         
-        // 说话时的呼吸感放大动作
         character.setAttribute('animation__scale', {
           property: 'scale',
           to: '1.35 1.35 1.35',
